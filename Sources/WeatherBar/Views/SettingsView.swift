@@ -89,6 +89,22 @@ public struct SettingsView: View {
                     Divider().opacity(0.6)
 
                     HStack {
+                        Text("Wind Speed Unit:")
+                            .font(.system(size: 12))
+                        Spacer()
+                        Picker("", selection: $viewModel.windSpeedUnit) {
+                            ForEach(WindSpeedUnit.allCases) { unit in
+                                Text(unit.displayName).tag(unit)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 170)
+                    }
+
+                    Divider().opacity(0.6)
+
+                    HStack {
                         Text("Menu Bar Style:")
                             .font(.system(size: 12))
                         Spacer()
@@ -117,6 +133,32 @@ public struct SettingsView: View {
                         .pickerStyle(.menu)
                         .frame(width: 170)
                     }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                )
+
+                // System & Startup (Open on Boot)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("SYSTEM & STARTUP")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+
+                    Toggle(isOn: Binding(
+                        get: { viewModel.launchAtLogin },
+                        set: { viewModel.setLaunchAtLogin(enabled: $0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Open on boot")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Automatically launch WeatherBar in the menu bar when your Mac boots.")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
                 }
                 .padding(10)
                 .background(

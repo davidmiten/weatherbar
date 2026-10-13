@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import ServiceManagement
 
 @MainActor
 public final class WeatherViewModel: ObservableObject {
@@ -36,6 +37,12 @@ public final class WeatherViewModel: ObservableObject {
         }
     }
 
+    @Published public var windSpeedUnit: WindSpeedUnit {
+        didSet {
+            saveWindUnitPreference()
+        }
+    }
+
     @Published public var menuBarDisplayMode: MenuBarDisplayMode {
         didSet {
             saveDisplayModePreference()
@@ -48,6 +55,8 @@ public final class WeatherViewModel: ObservableObject {
             setupTimer()
         }
     }
+
+    @Published public var launchAtLogin: Bool = false
 
     // MARK: - Private State
 
@@ -63,6 +72,7 @@ public final class WeatherViewModel: ObservableObject {
         self.savedLocations = Array(WeatherLocation.defaultPresets.prefix(5))
         self.selectedServiceId = "nws" // Primary default is NWS
         self.temperatureUnit = .fahrenheit
+        self.windSpeedUnit = .mph
         self.menuBarDisplayMode = .iconAndTemp
         self.refreshInterval = .fifteenMinutes
 
@@ -118,6 +128,11 @@ public final class WeatherViewModel: ObservableObject {
     public var formattedApparentTemp: String? {
         guard let appF = weatherData?.current.apparentTemperatureF else { return nil }
         return temperatureUnit.formatShort(degreesFahrenheit: appF)
+    }
+
+    public var formattedWindSpeed: String {
+        guard let current = weatherData?.current else { return "--" }
+        return windSpeedUnit.format(rawString: current.windSpeed)
     }
 
     public var formattedUpdatedTime: String {
@@ -205,8 +220,28 @@ public final class WeatherViewModel: ObservableObject {
     private let kSavedLocations = "weatherbar_saved_locations"
     private let kSelectedService = "weatherbar_selected_service"
     private let kTempUnit = "weatherbar_temp_unit"
+    private let kWindUnit = "weatherbar_wind_unit"
     private let kDisplayMode = "weatherbar_display_mode"
     private let kRefreshInterval = "weatherbar_refresh_interval"
+    private let kLaunchAtLogin = "weatherbar_launch_at_login"
+
+    public func setLaunchAtLogin(enabled: Bool) {
+        launchAtLogin = enabled
+        userDefaults.set(enabled, forKey: kLaunchAtLogin)
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                }
+            }
+        } catch {
+            print("Failed to update SMAppService launchAtLogin: \(error)")
+        }
+    }
 
     private func loadPreferences() {
         if let data = userDefaults.data(forKey: kSelectedLocation),
@@ -228,6 +263,11 @@ public final class WeatherViewModel: ObservableObject {
             self.temperatureUnit = unit
         }
 
+        if let windRaw = userDefaults.string(forKey: kWindUnit),
+           let wind = WindSpeedUnit(rawValue: windRaw) {
+            self.windSpeedUnit = wind
+        }
+
         if let modeRaw = userDefaults.string(forKey: kDisplayMode),
            let mode = MenuBarDisplayMode(rawValue: modeRaw) {
             self.menuBarDisplayMode = mode
@@ -236,6 +276,12 @@ public final class WeatherViewModel: ObservableObject {
         let intervalRaw = userDefaults.integer(forKey: kRefreshInterval)
         if intervalRaw > 0, let interval = RefreshInterval(rawValue: intervalRaw) {
             self.refreshInterval = interval
+        }
+
+        if SMAppService.mainApp.status == .enabled {
+            self.launchAtLogin = true
+        } else {
+            self.launchAtLogin = userDefaults.bool(forKey: kLaunchAtLogin)
         }
     }
 
@@ -257,6 +303,10 @@ public final class WeatherViewModel: ObservableObject {
 
     private func saveUnitPreference() {
         userDefaults.set(temperatureUnit.rawValue, forKey: kTempUnit)
+    }
+
+    private func saveWindUnitPreference() {
+        userDefaults.set(windSpeedUnit.rawValue, forKey: kWindUnit)
     }
 
     private func saveDisplayModePreference() {

@@ -70,7 +70,7 @@ public struct CurrentWeatherHeroView: View {
                     MetricBadgeView(
                         icon: "wind",
                         label: "Wind",
-                        value: current.windSpeed,
+                        value: viewModel.formattedWindSpeed,
                         tint: .teal
                     )
 

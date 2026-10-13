@@ -32,7 +32,9 @@ Designed with a pluggable architecture supporting multiple weather API providers
   - Save multiple favorite locations and switch between them with one click.
 
 - **Preferences & Settings**:
-  - Units: Toggle between Fahrenheit (°F) and Celsius (°C).
+  - Temperature Units: Toggle between Fahrenheit (°F) and Celsius (°C).
+  - Wind Speed Units: Toggle between MPH (miles per hour) and KPH (kilometers per hour).
+  - Open on Boot: System startup checkbox to automatically launch WeatherBar when macOS boots (via `ServiceManagement`).
   - Auto-refresh: Choose between 10 minutes, 15 minutes, 30 minutes, 1 hour, or manual.
   - Provider selection: Switch between NWS and Open-Meteo anytime.
 

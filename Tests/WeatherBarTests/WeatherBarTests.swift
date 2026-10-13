@@ -17,6 +17,19 @@ struct WeatherBarTests {
         #expect(celsius.formatShort(degreesFahrenheit: 68) == "20°")
     }
 
+    @Test("Wind Speed Unit Conversion")
+    func testWindSpeedUnitConversion() {
+        let mph = WindSpeedUnit.mph
+        let kph = WindSpeedUnit.kph
+
+        #expect(mph.format(speedMph: 10) == "10 mph")
+        #expect(kph.format(speedMph: 10) == "16 km/h")
+
+        #expect(mph.format(rawString: "5 mph") == "5 mph")
+        #expect(kph.format(rawString: "5 mph") == "8 km/h")
+        #expect(kph.format(rawString: "10 to 15 mph") == "16 to 24 km/h")
+    }
+
     @Test("Weather Location Display Formatting")
     func testWeatherLocationFormatting() {
         let seattle = WeatherLocation(name: "Seattle", adminArea: "WA", country: "United States", latitude: 47.6062, longitude: -122.3321)
