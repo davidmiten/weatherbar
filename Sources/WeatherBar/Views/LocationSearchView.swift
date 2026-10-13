@@ -2,7 +2,7 @@ import SwiftUI
 
 public struct LocationSearchView: View {
     @ObservedObject var viewModel: WeatherViewModel
-    @Environment(\.dismiss) private var dismiss
+    var onBack: (() -> Void)? = nil
 
     @State private var searchText: String = ""
     @State private var searchResults: [WeatherLocation] = []
@@ -12,32 +12,22 @@ public struct LocationSearchView: View {
     @State private var customName: String = ""
     @State private var showCustomCoordinates: Bool = false
 
-    public init(viewModel: WeatherViewModel) {
+    public init(viewModel: WeatherViewModel, onBack: (() -> Void)? = nil) {
         self.viewModel = viewModel
+        self.onBack = onBack
     }
 
     public var body: some View {
         VStack(spacing: 12) {
-            // Header
-            HStack {
-                Text("Select Location")
-                    .font(.headline)
-                Spacer()
-                Button(action: { dismiss() }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                        .font(.title3)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 4)
-
-            // Search bar
-            HStack {
+            // Search Input Field
+            HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                TextField("Search city or postal code...", text: $searchText)
+                    .font(.system(size: 13))
+
+                TextField("Search city, state, or postal code...", text: $searchText)
                     .textFieldStyle(.plain)
+                    .font(.system(size: 13))
                     .onSubmit {
                         performSearch()
                     }
@@ -49,6 +39,7 @@ public struct LocationSearchView: View {
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
+                            .font(.system(size: 12))
                     }
                     .buttonStyle(.plain)
                 }
@@ -56,60 +47,71 @@ public struct LocationSearchView: View {
                 if isSearching {
                     ProgressView()
                         .scaleEffect(0.6)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 14, height: 14)
                 }
             }
             .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
 
-            // Results / Presets List
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+            // Results and Presets ScrollView
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Search Results
                     if !searchResults.isEmpty {
-                        Text("SEARCH RESULTS")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("SEARCH RESULTS")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.secondary)
 
-                        ForEach(searchResults) { loc in
-                            LocationRow(location: loc, isSelected: viewModel.selectedLocation.id == loc.id) {
-                                viewModel.selectLocation(loc)
-                                dismiss()
+                            ForEach(searchResults) { loc in
+                                LocationRow(location: loc, isSelected: viewModel.selectedLocation.id == loc.id) {
+                                    viewModel.selectLocation(loc)
+                                    onBack?()
+                                }
                             }
                         }
-                        Divider()
+                        Divider().opacity(0.6)
                     }
 
                     // Saved Locations
                     if !viewModel.savedLocations.isEmpty {
-                        Text("SAVED LOCATIONS")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("SAVED LOCATIONS")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.secondary)
+
+                            ForEach(viewModel.savedLocations) { loc in
+                                LocationRow(location: loc, isSelected: viewModel.selectedLocation.id == loc.id) {
+                                    viewModel.selectLocation(loc)
+                                    onBack?()
+                                }
+                            }
+                        }
+                        Divider().opacity(0.6)
+                    }
+
+                    // Popular Presets
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("POPULAR PRESETS")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.secondary)
 
-                        ForEach(viewModel.savedLocations) { loc in
+                        ForEach(WeatherLocation.defaultPresets.prefix(8)) { loc in
                             LocationRow(location: loc, isSelected: viewModel.selectedLocation.id == loc.id) {
                                 viewModel.selectLocation(loc)
-                                dismiss()
+                                onBack?()
                             }
                         }
-                        Divider()
                     }
 
-                    // Quick US Presets
-                    Text("POPULAR PRESETS")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary)
-
-                    ForEach(WeatherLocation.defaultPresets.prefix(8)) { loc in
-                        LocationRow(location: loc, isSelected: viewModel.selectedLocation.id == loc.id) {
-                            viewModel.selectLocation(loc)
-                            dismiss()
-                        }
-                    }
-
-                    Divider()
+                    Divider().opacity(0.6)
 
                     // Custom Coordinates section
                     DisclosureGroup("Enter Custom Coordinates", isExpanded: $showCustomCoordinates) {
@@ -136,12 +138,12 @@ public struct LocationSearchView: View {
                                         longitude: lon
                                     )
                                     viewModel.selectLocation(loc)
-                                    dismiss()
+                                    onBack?()
                                 }
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .disabled(Double(customLat) == nil || Double(customLon) == nil)
+                            .disabled(Double(customLat.trimmingCharacters(in: .whitespaces)) == nil || Double(customLon.trimmingCharacters(in: .whitespaces)) == nil)
                         }
                         .padding(.top, 4)
                     }
@@ -151,8 +153,8 @@ public struct LocationSearchView: View {
                 .padding(.horizontal, 2)
             }
         }
-        .padding(16)
-        .frame(width: 320, height: 420)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private func performSearch() {
@@ -200,6 +202,7 @@ private struct LocationRow: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
