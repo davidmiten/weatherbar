@@ -82,24 +82,40 @@ weatherApp/
 
 ## Quick Start
 
-### 1. Build and Run the App
+### 1. Install Directly to `/Applications`
 
-To compile and launch the app into your macOS menu bar:
+To package and install WeatherBar into your macOS `/Applications` folder:
+
+```bash
+./scripts/install_to_applications.sh
+```
+
+This script:
+1. Compiles the release binary and packages the signed `WeatherBar.app` bundle with high-resolution app icons.
+2. Installs it into `/Applications/WeatherBar.app`.
+3. Registers it with macOS LaunchServices and starts the app in your menu bar.
+
+### 2. Package Drag-and-Drop DMG or ZIP Installer
+
+To package standalone installers for distribution:
+
+```bash
+# Create a drag-and-drop DMG installer (dist/WeatherBar.dmg)
+./scripts/package_app.sh --dmg
+
+# Or create all distribution packages (DMG, ZIP, and install to /Applications)
+./scripts/package_app.sh --all
+```
+
+### 3. Local Development & Testing
+
+To quickly build and run locally without installing to `/Applications`:
 
 ```bash
 ./scripts/run.sh
 ```
 
-Or build and open the application bundle manually:
-
-```bash
-./scripts/build_app.sh
-open WeatherBar.app
-```
-
-The weather widget will immediately appear in your menu bar next to the clock. Click on it to open the weather popover.
-
-### 2. Run the Unit & Integration Tests
+### 4. Run the Unit & Integration Tests
 
 The project includes unit tests for temperature conversion, icon mapping, service registry, geocoding, and live API fetch tests against the NWS and Open-Meteo endpoints:
 

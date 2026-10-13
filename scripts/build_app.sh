@@ -5,7 +5,7 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 cd "$DIR"
 
-echo "==> Building WeatherBar with Swift..."
+echo "==> Building WeatherBar release binary with Swift..."
 swift build -c release
 
 BIN_PATH="$DIR/.build/release/WeatherBar"
@@ -22,6 +22,11 @@ mkdir -p "$RESOURCES_DIR"
 # Copy binary
 cp "$BIN_PATH" "$MACOS_DIR/WeatherBar"
 
+# Copy AppIcon if available
+if [ -f "$DIR/Resources/AppIcon.icns" ]; then
+    cp "$DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+fi
+
 # Create Info.plist with LSUIElement = true (agent app that sits in the menubar without Dock icon)
 cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -32,6 +37,8 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>WeatherBar</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.weatherbar.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -56,8 +63,11 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
 </plist>
 EOF
 
+# Ad-hoc code sign the bundle for macOS security
+if which codesign >/dev/null 2>&1; then
+    echo "==> Applying ad-hoc signature to WeatherBar.app..."
+    codesign --force --deep --sign - "$APP_DIR"
+fi
+
 echo "==> WeatherBar.app bundle successfully created at:"
 echo "    $APP_DIR"
-echo ""
-echo "To launch the app:"
-echo "    open \"$APP_DIR\""
