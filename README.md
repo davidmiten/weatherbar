@@ -1,0 +1,139 @@
+# WeatherBar for macOS
+
+A native macOS menu bar GUI widget that displays weather information right next to your clock in the menu bar. Built with **Swift** and **SwiftUI**.
+
+Designed with a pluggable architecture supporting multiple weather API providers—starting with the **National Weather Service (NWS)** API as well as **Open-Meteo** for worldwide coverage.
+
+---
+
+## Features
+
+- **Menu Bar Widget (Next to Clock)**:
+  - Displays current condition icon and temperature directly in the macOS menu bar.
+  - Fully customizable: *Icon & Temperature*, *Icon Only*, or *Temperature Only*.
+  - Runs as an agent app (`LSUIElement`) so it stays neatly in your menu bar without cluttering the Dock.
+
+- **Rich Popover GUI**:
+  - **Hero View**: Current temperature, weather condition, feels like, high/low.
+  - **Detailed Metrics**: Humidity %, wind speed and direction, precipitation chance %, and dew point.
+  - **Severe Weather Alerts**: Displays active official warnings (from NWS) with expandable instructions and severity badges.
+  - **Hourly Forecast**: 24-hour horizontal scrolling view with temperatures, icons, and rain probabilities.
+  - **Extended Forecast**: Multi-day forecast with daily highs, lows, and conditions.
+
+- **Multiple Weather API Services**:
+  - **National Weather Service (NWS - `api.weather.gov`)**: Official US weather agency, high precision, no API key required.
+  - **Open-Meteo (`api.open-meteo.com`)**: Worldwide coverage with open-source meteorological models, no API key required.
+  - **Pluggable Architecture**: Built around a clean `WeatherService` protocol, making it straightforward to add new services (such as OpenWeatherMap, WeatherAPI, PirateWeather, etc.).
+
+- **Location Management**:
+  - Search any city, place, or postal code worldwide with automatic geocoding.
+  - Popular US presets (Seattle, San Francisco, New York, Chicago, Denver, Austin, Miami, etc.).
+  - Custom latitude & longitude coordinate entry.
+  - Save multiple favorite locations and switch between them with one click.
+
+- **Preferences & Settings**:
+  - Units: Toggle between Fahrenheit (°F) and Celsius (°C).
+  - Auto-refresh: Choose between 10 minutes, 15 minutes, 30 minutes, 1 hour, or manual.
+  - Provider selection: Switch between NWS and Open-Meteo anytime.
+
+---
+
+## Project Structure
+
+```
+weatherApp/
+├── Package.swift                    # Swift Package Manager definition (macOS 13+)
+├── WeatherBar.app/                  # Packaged macOS application bundle
+├── Sources/
+│   └── WeatherBar/
+│       ├── WeatherBarApp.swift      # Main app entry point with MenuBarExtra
+│       ├── Models/
+│       │   ├── WeatherLocation.swift# Location model with coordinates and presets
+│       │   ├── WeatherData.swift    # Current, hourly, daily, and alert models
+│       │   ├── Settings.swift       # Preferences (Units, Display mode, Refresh intervals)
+│       │   └── WeatherIconMapper.swift # Maps conditions/WMO codes to SF Symbols & colors
+│       ├── Services/
+│       │   ├── WeatherService.swift # WeatherService protocol & Service Registry
+│       │   ├── NWSWeatherService.swift # National Weather Service API provider
+│       │   ├── OpenMeteoWeatherService.swift # Open-Meteo API provider
+│       │   └── GeocodingService.swift # City search & coordinate geocoding
+│       ├── ViewModels/
+│       │   └── WeatherViewModel.swift# State management, background timer, persistence
+│       └── Views/
+│           ├── MenuBarLabelView.swift# Icon and temperature label in system menu bar
+│           ├── WeatherPopOverView.swift # Main interactive popover window
+│           ├── CurrentWeatherHeroView.swift # Temperature and metrics grid
+│           ├── HourlyForecastView.swift # Horizontal hourly forecast cards
+│           ├── DailyForecastView.swift # Extended multi-day forecast list
+│           ├── AlertsBannerView.swift # Warning banner for severe weather alerts
+│           ├── LocationSearchView.swift # Search modal for cities & coordinates
+│           └── SettingsView.swift   # Preferences sheet
+├── Tests/
+│   └── WeatherBarTests/
+│       └── WeatherBarTests.swift    # Unit & live integration test suite
+└── scripts/
+    ├── build_app.sh                 # Compiles and packages WeatherBar.app bundle
+    └── run.sh                       # One-command script to build and launch the app
+```
+
+---
+
+## Quick Start
+
+### 1. Build and Run the App
+
+To compile and launch the app into your macOS menu bar:
+
+```bash
+./scripts/run.sh
+```
+
+Or build and open the application bundle manually:
+
+```bash
+./scripts/build_app.sh
+open WeatherBar.app
+```
+
+The weather widget will immediately appear in your menu bar next to the clock. Click on it to open the weather popover.
+
+### 2. Run the Unit & Integration Tests
+
+The project includes unit tests for temperature conversion, icon mapping, service registry, geocoding, and live API fetch tests against the NWS and Open-Meteo endpoints:
+
+```bash
+swift test
+```
+
+---
+
+## Adding New Weather API Providers
+
+To add a new weather API service (e.g. OpenWeatherMap):
+
+1. Implement the `WeatherService` protocol:
+   ```swift
+   public struct MyCustomWeatherService: WeatherService {
+       public let id = "my-service"
+       public let displayName = "My Weather API"
+       public let attributionText = "Data from MyWeatherAPI"
+       public let requiresAPIKey = true
+       public let supportsGlobalLocations = true
+       public let serviceDescription = "Description of the service..."
+
+       public func fetchWeather(for location: WeatherLocation) async throws -> WeatherData {
+           // Fetch from API and return WeatherData
+       }
+   }
+   ```
+2. Register your service in `WeatherServiceRegistry.shared`:
+   ```swift
+   WeatherServiceRegistry.shared.register(MyCustomWeatherService())
+   ```
+3. The new provider will immediately appear in the **Preferences** provider selector!
+
+---
+
+## License
+
+MIT
