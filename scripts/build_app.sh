@@ -22,10 +22,22 @@ mkdir -p "$RESOURCES_DIR"
 # Copy binary
 cp "$BIN_PATH" "$MACOS_DIR/WeatherBar"
 
-# Copy AppIcon if available
+# Generate or update AppIcon.icns if needed
+if [ -f "$DIR/Resources/AppIcon_1024.png" ]; then
+    if [ ! -f "$DIR/Resources/AppIcon.icns" ] || [ "$DIR/Resources/AppIcon_1024.png" -nt "$DIR/Resources/AppIcon.icns" ]; then
+        echo "==> Updating AppIcon.icns from Resources/AppIcon_1024.png..."
+        "$DIR/scripts/generate_icns.sh"
+    fi
+fi
+
+# Copy AppIcon into bundle if available
 if [ -f "$DIR/Resources/AppIcon.icns" ]; then
     cp "$DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi
+if [ -f "$DIR/Resources/AppIcon_1024.png" ]; then
+    cp "$DIR/Resources/AppIcon_1024.png" "$RESOURCES_DIR/AppIcon.png"
+fi
+
 
 # Create Info.plist with LSUIElement = true (agent app that sits in the menubar without Dock icon)
 cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
