@@ -70,11 +70,17 @@ weatherApp/
 │           ├── AlertsBannerView.swift # Warning banner for severe weather alerts
 │           ├── LocationSearchView.swift # Search modal for cities & coordinates
 │           └── SettingsView.swift   # Preferences sheet
+├── Resources/
+│   ├── AppIcon_1024.png             # Master 1024x1024 PNG icon
+│   └── AppIcon.icns                 # Compiled multi-resolution macOS icon bundle
 ├── Tests/
 │   └── WeatherBarTests/
 │       └── WeatherBarTests.swift    # Unit & live integration test suite
 └── scripts/
-    ├── build_app.sh                 # Compiles and packages WeatherBar.app bundle
+    ├── build_app.sh                 # Compiles release binary and packages WeatherBar.app
+    ├── generate_icns.sh             # Generates AppIcon.icns from AppIcon_1024.png
+    ├── install_to_applications.sh   # Compiles, signs, and installs to /Applications
+    ├── package_app.sh               # Builds app, drag-and-drop DMG, or ZIP archives
     └── run.sh                       # One-command script to build and launch the app
 ```
 

@@ -205,17 +205,30 @@ public struct SettingsView: View {
                 )
 
                 // About / Attribution
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("ABOUT & ATTRIBUTION")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.secondary)
 
-                    Text("WeatherBar for macOS")
-                        .font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 10) {
+                        if let appIcon = NSApp.applicationIconImage {
+                            Image(nsImage: appIcon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 36, height: 36)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .shadow(color: .black.opacity(0.15), radius: 2, x: 0, y: 1)
+                        }
 
-                    Text(viewModel.currentService.attributionText)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("WeatherBar for macOS")
+                                .font(.system(size: 12, weight: .medium))
+
+                            Text(viewModel.currentService.attributionText)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 .padding(10)
             }
