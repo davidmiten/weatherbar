@@ -13,10 +13,13 @@ public final class WeatherViewModel: ObservableObject {
 
     @Published public var selectedLocation: WeatherLocation {
         didSet {
+            radarViewModel.updateLocation(selectedLocation)
             saveLocationPreference()
             Task { await refresh() }
         }
     }
+
+    @Published public var radarViewModel: RadarViewModel
 
     @Published public var savedLocations: [WeatherLocation] {
         didSet {
@@ -69,6 +72,7 @@ public final class WeatherViewModel: ObservableObject {
         // Defaults
         let defaultLocation = WeatherLocation.defaultPresets[0] // Seattle, WA
         self.selectedLocation = defaultLocation
+        self.radarViewModel = RadarViewModel(location: defaultLocation)
         self.savedLocations = Array(WeatherLocation.defaultPresets.prefix(5))
         self.selectedServiceId = "nws" // Primary default is NWS
         self.temperatureUnit = .fahrenheit
@@ -247,6 +251,7 @@ public final class WeatherViewModel: ObservableObject {
         if let data = userDefaults.data(forKey: kSelectedLocation),
            let loc = try? JSONDecoder().decode(WeatherLocation.self, from: data) {
             self.selectedLocation = loc
+            self.radarViewModel.updateLocation(loc)
         }
 
         if let data = userDefaults.data(forKey: kSavedLocations),

@@ -20,6 +20,15 @@ Designed with a pluggable architecture supporting multiple weather API providers
   - **Hourly Forecast**: 24-hour horizontal scrolling view with temperatures, icons, and rain probabilities.
   - **Extended Forecast**: Multi-day forecast with daily highs, lows, and conditions.
 
+- **Live Weather Radar Maps (RainViewer API)**:
+  - **Interactive Radar Map**: Global weather radar tile overlays powered by RainViewer's public API.
+  - **Location-Centered**: Automatically centered on your currently selected city with a marker pin.
+  - **Historical Playback Loop**: Animated loop of past radar scans spanning the previous 2 hours with play/pause and single-frame stepping.
+  - **Timeline Scrubber**: Interactive slider to inspect precipitation history at 10-minute intervals up to the latest scan.
+  - **Map Tools**: Recenter button, zoom controls (levels 3–7), and toggle between Standard map and Satellite imagery.
+  - **Reflectivity Legend**: Universal Blue precipitation color scale (Light, Moderate, Heavy, Severe).
+  - **Quick Access**: Dedicated radar entry card right in the main weather screen and radar button in the popover header.
+
 - **Multiple Weather API Services**:
   - **National Weather Service (NWS - `api.weather.gov`)**: Official US weather agency, high precision, no API key required.
   - **Open-Meteo (`api.open-meteo.com`)**: Worldwide coverage with open-source meteorological models, no API key required.
@@ -58,12 +67,15 @@ weatherApp/
 │       │   ├── WeatherService.swift # WeatherService protocol & Service Registry
 │       │   ├── NWSWeatherService.swift # National Weather Service API provider
 │       │   ├── OpenMeteoWeatherService.swift # Open-Meteo API provider
+│       │   ├── RainViewerService.swift # RainViewer Radar tile & metadata provider
 │       │   └── GeocodingService.swift # City search & coordinate geocoding
 │       ├── ViewModels/
-│       │   └── WeatherViewModel.swift# State management, background timer, persistence
+│       │   ├── WeatherViewModel.swift# State management, background timer, persistence
+│       │   └── RadarViewModel.swift  # Radar state, frame playback loop, map controls
 │       └── Views/
 │           ├── MenuBarLabelView.swift# Icon and temperature label in system menu bar
 │           ├── WeatherPopOverView.swift # Main interactive popover window
+│           ├── RadarMapView.swift   # Interactive MapKit radar view & quick card
 │           ├── CurrentWeatherHeroView.swift # Temperature and metrics grid
 │           ├── HourlyForecastView.swift # Horizontal hourly forecast cards
 │           ├── DailyForecastView.swift # Extended multi-day forecast list

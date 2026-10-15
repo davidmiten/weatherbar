@@ -2,6 +2,7 @@ import SwiftUI
 
 public enum PopOverPanel: Equatable {
     case weather
+    case radar
     case locationPicker
     case search
     case settings
@@ -30,6 +31,9 @@ public struct WeatherPopOverView: View {
                 switch activePanel {
                 case .weather:
                     weatherView
+                        .transition(.opacity)
+                case .radar:
+                    RadarPanelView(viewModel: viewModel.radarViewModel)
                         .transition(.opacity)
                 case .locationPicker:
                     locationPickerView
@@ -111,6 +115,19 @@ public struct WeatherPopOverView: View {
                 .buttonStyle(.plain)
                 .help("Refresh weather")
 
+                // Radar button
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        activePanel = .radar
+                    }
+                }) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Weather radar maps")
+
                 // Search button
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -136,6 +153,29 @@ public struct WeatherPopOverView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Preferences")
+
+            case .radar:
+                backButton(label: "Weather")
+                Spacer()
+                Text("Weather Radar")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button(action: {
+                    Task {
+                        await viewModel.radarViewModel.loadRadarData(force: true)
+                    }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(viewModel.radarViewModel.isLoading ? 360 : 0))
+                        .animation(
+                            viewModel.radarViewModel.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default,
+                            value: viewModel.radarViewModel.isLoading
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Refresh radar")
 
             case .locationPicker:
                 backButton(label: "Weather")
@@ -251,6 +291,12 @@ public struct WeatherPopOverView: View {
                 // Content when loaded
                 if viewModel.weatherData != nil {
                     CurrentWeatherHeroView(viewModel: viewModel)
+
+                    RadarQuickCardView(location: viewModel.selectedLocation) {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            activePanel = .radar
+                        }
+                    }
 
                     if let hourly = viewModel.weatherData?.hourly, !hourly.isEmpty {
                         HourlyForecastView(items: hourly, unit: viewModel.temperatureUnit)

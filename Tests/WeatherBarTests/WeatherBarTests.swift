@@ -108,4 +108,113 @@ struct WeatherBarTests {
         #expect(!results.isEmpty)
         #expect(results.contains(where: { $0.name.lowercased().contains("chicago") }))
     }
+
+    @Test("RainViewer Tile and Snapshot URL Generation")
+    func testRainViewerURLGeneration() {
+        let service = RainViewerService.shared
+        let frame = RadarFrame(time: 1710000000, path: "/v2/radar/abc12345")
+        let host = "https://tilecache.rainviewer.com"
+
+        let tileTemplate = service.tileURLTemplate(host: host, frame: frame, tileSize: 256, colorScheme: .universalBlue, smooth: true, snow: true)
+        #expect(tileTemplate == "https://tilecache.rainviewer.com/v2/radar/abc12345/256/{z}/{x}/{y}/2/1_1.png")
+
+        let snapshotURL = service.coordinateSnapshotURL(
+            host: host,
+            frame: frame,
+            latitude: 47.6062,
+            longitude: -122.3321,
+            zoom: 6,
+            tileSize: 512,
+            colorScheme: .universalBlue,
+            smooth: true,
+            snow: true
+        )
+        #expect(snapshotURL?.absoluteString == "https://tilecache.rainviewer.com/v2/radar/abc12345/512/6/47.6062/-122.3321/2/1_1.png")
+
+        let coverage = service.coverageTileURLTemplate(host: host, tileSize: 256)
+        #expect(coverage == "https://tilecache.rainviewer.com/v2/coverage/0/256/{z}/{x}/{y}/0/0_0.png")
+    }
+
+    @Test("Radar Frame Relative Time Formatting")
+    func testRadarFrameRelativeTime() {
+        let now = Date()
+        let frameNow = RadarFrame(time: Int(now.timeIntervalSince1970), path: "/v2/radar/test")
+        #expect(frameNow.relativeTimeString(relativeTo: now) == "Latest")
+
+        let tenMinAgo = now.addingTimeInterval(-600)
+        let frameTenMinAgo = RadarFrame(time: Int(tenMinAgo.timeIntervalSince1970), path: "/v2/radar/test")
+        #expect(frameTenMinAgo.relativeTimeString(relativeTo: now) == "-10m")
+
+        let eightyMinAgo = now.addingTimeInterval(-4800)
+        let frameEightyMinAgo = RadarFrame(time: Int(eightyMinAgo.timeIntervalSince1970), path: "/v2/radar/test")
+        #expect(frameEightyMinAgo.relativeTimeString(relativeTo: now) == "-1h 20m")
+    }
+
+    @Test("RainViewer Live API Fetch")
+    func testRainViewerLiveFetch() async throws {
+        let service = RainViewerService.shared
+        let metadata = try await service.fetchMetadata()
+
+        #expect(!metadata.host.isEmpty)
+        #expect(metadata.host.starts(with: "http"))
+        #expect(!metadata.radar.past.isEmpty)
+
+        // Radar should have multiple frames from the past 2 hours
+        let pastFrames = metadata.radar.past
+        #expect(pastFrames.count >= 5)
+
+        let latest = pastFrames.last!
+        #expect(latest.time > 0)
+        #expect(!latest.path.isEmpty)
+        #expect(latest.path.starts(with: "/v2/radar/"))
+    }
+
+    @Test("Radar ViewModel State and Frame Navigation")
+    @MainActor
+    func testRadarViewModelNavigation() {
+        let seattle = WeatherLocation(name: "Seattle", adminArea: "WA", latitude: 47.6062, longitude: -122.3321)
+        let vm = RadarViewModel(location: seattle)
+
+        let mockFrames = [
+            RadarFrame(time: 1000, path: "/v2/radar/f1"),
+            RadarFrame(time: 1600, path: "/v2/radar/f2"),
+            RadarFrame(time: 2200, path: "/v2/radar/f3")
+        ]
+        vm.frames = mockFrames
+        vm.currentFrameIndex = 2
+
+        #expect(vm.isLatestFrame == true)
+        #expect(vm.currentFrame?.path == "/v2/radar/f3")
+
+        vm.stepBackward()
+        #expect(vm.currentFrameIndex == 1)
+        #expect(vm.isLatestFrame == false)
+
+        vm.stepForward()
+        #expect(vm.currentFrameIndex == 2)
+        #expect(vm.isLatestFrame == true)
+
+        vm.selectFrame(at: 0)
+        #expect(vm.currentFrameIndex == 0)
+
+        vm.jumpToLatest()
+        #expect(vm.currentFrameIndex == 2)
+
+        vm.zoomLevel = 6.0
+        vm.zoomIn()
+        #expect(vm.zoomLevel == 7.0)
+        vm.zoomIn()
+        #expect(vm.zoomLevel == 7.0)
+
+        vm.zoomLevel = 4.0
+        vm.zoomOut()
+        #expect(vm.zoomLevel == 3.0)
+        vm.zoomOut()
+        #expect(vm.zoomLevel == 3.0)
+
+        #expect(vm.isSatelliteMode == false)
+        vm.toggleSatellite()
+        #expect(vm.isSatelliteMode == true)
+    }
 }
+
