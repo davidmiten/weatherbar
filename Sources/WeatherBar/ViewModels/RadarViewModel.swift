@@ -134,12 +134,12 @@ public final class RadarViewModel: ObservableObject {
             let meta = try await service.fetchMetadata()
             self.metadata = meta
             let pastFrames = meta.radar.past.sorted { $0.time < $1.time }
-            self.frames = pastFrames
 
+            // Default to latest frame before publishing frames to prevent flashing frame 0
             if !pastFrames.isEmpty {
-                // Default to latest frame
                 self.currentFrameIndex = pastFrames.count - 1
             }
+            self.frames = pastFrames
             self.lastFetchTime = Date()
             self.errorMessage = nil
         } catch let serviceError as WeatherServiceError {
@@ -221,13 +221,13 @@ public final class RadarViewModel: ObservableObject {
 
         playbackTask = Task { [weak self] in
             while !Task.isCancelled {
-                // 650ms between frames for smooth animation
-                try? await Task.sleep(nanoseconds: 650_000_000)
+                // 850ms between frames for comfortable, visible animation
+                try? await Task.sleep(nanoseconds: 850_000_000)
                 guard !Task.isCancelled, let self = self else { break }
 
                 if self.currentFrameIndex >= self.frames.count - 1 {
-                    // Slight dwell on the latest frame
-                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    // Dwell on the latest scan for 1.8 seconds so current clouds remain visible
+                    try? await Task.sleep(nanoseconds: 1_800_000_000)
                     guard !Task.isCancelled else { break }
                     self.currentFrameIndex = 0
                 } else {

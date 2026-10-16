@@ -2,6 +2,57 @@ import SwiftUI
 import MapKit
 import AppKit
 
+// MARK: - RainViewer Cached Tile Overlay
+
+public final class RainViewerTileOverlay: MKTileOverlay {
+    public static let tileCache: NSCache<NSString, NSData> = {
+        let cache = NSCache<NSString, NSData>()
+        cache.countLimit = 400
+        cache.totalCostLimit = 40 * 1024 * 1024 // 40 MB
+        return cache
+    }()
+
+    public override func url(forTilePath path: MKTileOverlayPath) -> URL {
+        var z = path.z
+        if z > 7 { z = 7 }
+        if z < 1 { z = 1 }
+
+        let template = self.urlTemplate ?? ""
+        let urlStr = template
+            .replacingOccurrences(of: "{z}", with: "\(z)")
+            .replacingOccurrences(of: "{x}", with: "\(path.x)")
+            .replacingOccurrences(of: "{y}", with: "\(path.y)")
+
+        return URL(string: urlStr) ?? super.url(forTilePath: path)
+    }
+
+    public override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, Error?) -> Void) {
+        let tileURL = url(forTilePath: path)
+        let cacheKey = tileURL.absoluteString as NSString
+
+        if let cached = Self.tileCache.object(forKey: cacheKey) {
+            result(cached as Data, nil)
+            return
+        }
+
+        var request = URLRequest(url: tileURL)
+        request.timeoutInterval = 12.0
+        request.setValue("WeatherBar/1.0 (macOS Weather Radar)", forHTTPHeaderField: "User-Agent")
+
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200, let data = data {
+                Self.tileCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
+                result(data, nil)
+            } else if let data = data, !data.isEmpty {
+                result(data, nil)
+            } else {
+                result(nil, error)
+            }
+        }
+        task.resume()
+    }
+}
+
 // MARK: - AppKit MKMapView Representable
 
 public struct RadarMKMapView: NSViewRepresentable {
@@ -25,6 +76,12 @@ public struct RadarMKMapView: NSViewRepresentable {
         mapView.showsCompass = false
         mapView.showsScale = true
 
+        // Constrain camera zoom distance to match RainViewer zoom levels 3 to 7
+        mapView.cameraZoomRange = MKMapView.CameraZoomRange(
+            minCenterCoordinateDistance: 70_000,
+            maxCenterCoordinateDistance: 8_000_000
+        )
+
         // Configure initial camera center and span
         let center = CLLocationCoordinate2D(
             latitude: viewModel.selectedLocation.latitude,
@@ -45,7 +102,7 @@ public struct RadarMKMapView: NSViewRepresentable {
 
         // Add initial tile overlay if available
         if let template = viewModel.currentTileURLTemplate {
-            let overlay = MKTileOverlay(urlTemplate: template)
+            let overlay = RainViewerTileOverlay(urlTemplate: template)
             overlay.canReplaceMapContent = false
             overlay.maximumZ = 7
             overlay.minimumZ = 1
@@ -89,21 +146,31 @@ public struct RadarMKMapView: NSViewRepresentable {
             mapView.setRegion(MKCoordinateRegion(center: currentCenter, span: span), animated: true)
         }
 
-        // Handle radar frame tile overlay change
+        // Handle radar frame tile overlay change smoothly without flashing
         let newTemplate = viewModel.currentTileURLTemplate
         if context.coordinator.currentTemplate != newTemplate {
             context.coordinator.currentTemplate = newTemplate
 
-            // Remove existing overlays
-            let existingOverlays = mapView.overlays
+            let existingOverlays = mapView.overlays.filter { $0 is MKTileOverlay }
+
             if let template = newTemplate {
-                let newOverlay = MKTileOverlay(urlTemplate: template)
+                let newOverlay = RainViewerTileOverlay(urlTemplate: template)
                 newOverlay.canReplaceMapContent = false
                 newOverlay.maximumZ = 7
                 newOverlay.minimumZ = 1
                 mapView.addOverlay(newOverlay, level: .aboveRoads)
-            }
-            if !existingOverlays.isEmpty {
+
+                // Retain previous overlay for 350ms so clouds do not vanish while new tiles load
+                if !existingOverlays.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak mapView] in
+                        guard let mapView = mapView else { return }
+                        // Ensure newOverlay is still the active one before removing prior overlays
+                        if mapView.overlays.contains(where: { ($0 as? RainViewerTileOverlay) === newOverlay }) {
+                            mapView.removeOverlays(existingOverlays)
+                        }
+                    }
+                }
+            } else {
                 mapView.removeOverlays(existingOverlays)
             }
         }
@@ -141,6 +208,7 @@ public struct RadarMKMapView: NSViewRepresentable {
             self.parent = parent
             self.currentOpacity = parent.viewModel.overlayOpacity
             self.lastZoomLevel = parent.viewModel.zoomLevel
+            self.lastRecenterTrigger = parent.viewModel.recenterTrigger
         }
 
         public func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
