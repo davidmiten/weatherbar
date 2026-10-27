@@ -7,8 +7,8 @@ import AppKit
 public final class RainViewerTileOverlay: MKTileOverlay {
     public static let tileCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
-        cache.countLimit = 400
-        cache.totalCostLimit = 40 * 1024 * 1024 // 40 MB
+        cache.countLimit = 500
+        cache.totalCostLimit = 60 * 1024 * 1024 // 60 MB
         return cache
     }()
 
@@ -50,6 +50,73 @@ public final class RainViewerTileOverlay: MKTileOverlay {
             }
         }
         task.resume()
+    }
+
+    /// Prefetches visible radar tiles for the current coordinates and zoom level across frames into memory cache
+    public static func prefetchTiles(
+        service: RainViewerService,
+        host: String,
+        frames: [RadarFrame],
+        center: CLLocationCoordinate2D,
+        zoom: Double
+    ) {
+        let z = min(7, max(1, Int(round(zoom))))
+        let n = pow(2.0, Double(z))
+        let lonClamped = max(-180.0, min(180.0, center.longitude))
+        let centerX = Int(floor((lonClamped + 180.0) / 360.0 * n))
+
+        let latClamped = max(-85.0511, min(85.0511, center.latitude))
+        let latRad = latClamped * .pi / 180.0
+        let centerY = Int(floor((1.0 - log(tan(latRad) + 1.0 / cos(latRad)) / .pi) / 2.0 * n))
+
+        let maxCoord = max(0, Int(n) - 1)
+
+        // 3x3 grid around center tile covers visible map area at current zoom
+        var tileCoords: [(x: Int, y: Int)] = []
+        for dx in -1...1 {
+            for dy in -1...1 {
+                let x = min(maxCoord, max(0, centerX + dx))
+                let y = min(maxCoord, max(0, centerY + dy))
+                tileCoords.append((x, y))
+            }
+        }
+
+        DispatchQueue.global(qos: .utility).async {
+            for frame in frames {
+                let template = service.tileURLTemplate(
+                    host: host,
+                    frame: frame,
+                    tileSize: 256,
+                    colorScheme: .universalBlue,
+                    smooth: true,
+                    snow: true
+                )
+
+                for coord in tileCoords {
+                    let urlStr = template
+                        .replacingOccurrences(of: "{z}", with: "\(z)")
+                        .replacingOccurrences(of: "{x}", with: "\(coord.x)")
+                        .replacingOccurrences(of: "{y}", with: "\(coord.y)")
+
+                    guard let url = URL(string: urlStr) else { continue }
+                    let cacheKey = urlStr as NSString
+
+                    if tileCache.object(forKey: cacheKey) != nil {
+                        continue
+                    }
+
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 8.0
+                    request.setValue("WeatherBar/1.0 (macOS Weather Radar)", forHTTPHeaderField: "User-Agent")
+
+                    URLSession.shared.dataTask(with: request) { data, response, _ in
+                        if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200, let data = data {
+                            tileCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
+                        }
+                    }.resume()
+                }
+            }
+        }
     }
 }
 
@@ -100,20 +167,15 @@ public struct RadarMKMapView: NSViewRepresentable {
         // Set initial map type
         mapView.mapType = viewModel.isSatelliteMode ? .hybrid : .standard
 
-        // Add initial tile overlay if available
-        if let template = viewModel.currentTileURLTemplate {
-            let overlay = RainViewerTileOverlay(urlTemplate: template)
-            overlay.canReplaceMapContent = false
-            overlay.maximumZ = 7
-            overlay.minimumZ = 1
-            mapView.addOverlay(overlay, level: .aboveRoads)
-            context.coordinator.currentTemplate = template
-        }
+        // Initialize overlays if radar frames are already loaded
+        context.coordinator.updateOverlays(in: mapView, viewModel: viewModel)
 
         return mapView
     }
 
     public func updateNSView(_ mapView: MKMapView, context: Context) {
+        let coordinator = context.coordinator
+
         let targetType: MKMapType = viewModel.isSatelliteMode ? .hybrid : .standard
         if mapView.mapType != targetType {
             mapView.mapType = targetType
@@ -124,7 +186,7 @@ public struct RadarMKMapView: NSViewRepresentable {
             latitude: viewModel.selectedLocation.latitude,
             longitude: viewModel.selectedLocation.longitude
         )
-        if let pin = context.coordinator.locationAnnotation {
+        if let pin = coordinator.locationAnnotation {
             if pin.coordinate.latitude != center.latitude || pin.coordinate.longitude != center.longitude {
                 pin.coordinate = center
                 pin.title = viewModel.selectedLocation.displayName
@@ -132,58 +194,22 @@ public struct RadarMKMapView: NSViewRepresentable {
         }
 
         // Handle recenter trigger or location change
-        if context.coordinator.lastRecenterTrigger != viewModel.recenterTrigger {
-            context.coordinator.lastRecenterTrigger = viewModel.recenterTrigger
+        if coordinator.lastRecenterTrigger != viewModel.recenterTrigger {
+            coordinator.lastRecenterTrigger = viewModel.recenterTrigger
             let span = Self.span(for: viewModel.zoomLevel, latitude: viewModel.selectedLocation.latitude)
             mapView.setRegion(MKCoordinateRegion(center: center, span: span), animated: true)
         }
 
         // Handle zoom level change from controls
-        if abs(context.coordinator.lastZoomLevel - viewModel.zoomLevel) > 0.01 {
-            context.coordinator.lastZoomLevel = viewModel.zoomLevel
+        if abs(coordinator.lastZoomLevel - viewModel.zoomLevel) > 0.01 {
+            coordinator.lastZoomLevel = viewModel.zoomLevel
             let currentCenter = mapView.region.center
             let span = Self.span(for: viewModel.zoomLevel, latitude: currentCenter.latitude)
             mapView.setRegion(MKCoordinateRegion(center: currentCenter, span: span), animated: true)
         }
 
-        // Handle radar frame tile overlay change smoothly without flashing
-        let newTemplate = viewModel.currentTileURLTemplate
-        if context.coordinator.currentTemplate != newTemplate {
-            context.coordinator.currentTemplate = newTemplate
-
-            let existingOverlays = mapView.overlays.filter { $0 is MKTileOverlay }
-
-            if let template = newTemplate {
-                let newOverlay = RainViewerTileOverlay(urlTemplate: template)
-                newOverlay.canReplaceMapContent = false
-                newOverlay.maximumZ = 7
-                newOverlay.minimumZ = 1
-                mapView.addOverlay(newOverlay, level: .aboveRoads)
-
-                // Retain previous overlay for 350ms so clouds do not vanish while new tiles load
-                if !existingOverlays.isEmpty {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak mapView] in
-                        guard let mapView = mapView else { return }
-                        // Ensure newOverlay is still the active one before removing prior overlays
-                        if mapView.overlays.contains(where: { ($0 as? RainViewerTileOverlay) === newOverlay }) {
-                            mapView.removeOverlays(existingOverlays)
-                        }
-                    }
-                }
-            } else {
-                mapView.removeOverlays(existingOverlays)
-            }
-        }
-
-        // Update opacity if changed
-        if abs(context.coordinator.currentOpacity - viewModel.overlayOpacity) > 0.01 {
-            context.coordinator.currentOpacity = viewModel.overlayOpacity
-            for overlay in mapView.overlays {
-                if let renderer = mapView.renderer(for: overlay) as? MKTileOverlayRenderer {
-                    renderer.alpha = CGFloat(viewModel.overlayOpacity)
-                }
-            }
-        }
+        // Synchronize radar tile overlays with smooth frame-to-frame interpolation
+        coordinator.updateOverlays(in: mapView, viewModel: viewModel)
     }
 
     public static func span(for zoomLevel: Double, latitude: Double) -> MKCoordinateSpan {
@@ -198,23 +224,31 @@ public struct RadarMKMapView: NSViewRepresentable {
 
     public final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: RadarMKMapView
-        var currentTemplate: String? = nil
-        var currentOpacity: Double = 0.75
         var lastRecenterTrigger: UUID? = nil
         var lastZoomLevel: Double = 6.0
         weak var locationAnnotation: MKPointAnnotation?
 
+        // Dual-overlay ping-pong state for smooth continuous frame interpolation
+        var overlayA: RainViewerTileOverlay?
+        var templateA: String?
+        var overlayB: RainViewerTileOverlay?
+        var templateB: String?
+
+        var targetAlphas: [ObjectIdentifier: CGFloat] = [:]
+        var renderers: [ObjectIdentifier: MKTileOverlayRenderer] = [:]
+
         init(_ parent: RadarMKMapView) {
             self.parent = parent
-            self.currentOpacity = parent.viewModel.overlayOpacity
             self.lastZoomLevel = parent.viewModel.zoomLevel
             self.lastRecenterTrigger = parent.viewModel.recenterTrigger
         }
 
         public func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            if let tileOverlay = overlay as? MKTileOverlay {
+            if let tileOverlay = overlay as? RainViewerTileOverlay {
                 let renderer = MKTileOverlayRenderer(tileOverlay: tileOverlay)
-                renderer.alpha = CGFloat(currentOpacity)
+                let alpha = targetAlphas[ObjectIdentifier(tileOverlay)] ?? CGFloat(parent.viewModel.overlayOpacity)
+                renderer.alpha = alpha
+                renderers[ObjectIdentifier(tileOverlay)] = renderer
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
@@ -230,6 +264,194 @@ public struct RadarMKMapView: NSViewRepresentable {
             marker.glyphImage = NSImage(systemSymbolName: "location.fill", accessibilityDescription: nil)
             marker.canShowCallout = true
             return marker
+        }
+
+        private func setAlpha(for overlay: RainViewerTileOverlay, in mapView: MKMapView, alpha: CGFloat) {
+            targetAlphas[ObjectIdentifier(overlay)] = alpha
+            let renderer = renderers[ObjectIdentifier(overlay)] ?? (mapView.renderer(for: overlay) as? MKTileOverlayRenderer)
+            if let renderer = renderer {
+                renderers[ObjectIdentifier(overlay)] = renderer
+                if abs(renderer.alpha - alpha) > 0.005 {
+                    renderer.alpha = alpha
+                    renderer.setNeedsDisplay()
+                }
+            }
+        }
+
+        public func updateOverlays(in mapView: MKMapView, viewModel: RadarViewModel) {
+            guard !viewModel.frames.isEmpty else {
+                removeAllOverlays(from: mapView)
+                return
+            }
+
+            let baseOpacity = CGFloat(viewModel.overlayOpacity)
+
+            guard viewModel.isInterpolating && viewModel.frames.count > 1 else {
+                // Non-interpolated mode: single frame display
+                guard let currentTemplate = viewModel.currentTileURLTemplate else {
+                    removeAllOverlays(from: mapView)
+                    return
+                }
+
+                if let b = overlayB {
+                    mapView.removeOverlay(b)
+                    renderers.removeValue(forKey: ObjectIdentifier(b))
+                    targetAlphas.removeValue(forKey: ObjectIdentifier(b))
+                    overlayB = nil
+                    templateB = nil
+                }
+
+                if templateA == currentTemplate, let a = overlayA {
+                    setAlpha(for: a, in: mapView, alpha: baseOpacity)
+                } else {
+                    if let a = overlayA {
+                        mapView.removeOverlay(a)
+                        renderers.removeValue(forKey: ObjectIdentifier(a))
+                        targetAlphas.removeValue(forKey: ObjectIdentifier(a))
+                    }
+                    let newA = RainViewerTileOverlay(urlTemplate: currentTemplate)
+                    newA.canReplaceMapContent = false
+                    newA.maximumZ = 7
+                    newA.minimumZ = 1
+                    overlayA = newA
+                    templateA = currentTemplate
+                    targetAlphas[ObjectIdentifier(newA)] = baseOpacity
+                    mapView.addOverlay(newA, level: .aboveRoads)
+                    setAlpha(for: newA, in: mapView, alpha: baseOpacity)
+                }
+                return
+            }
+
+            // Interpolated mode: double-buffered crossfade between adjacent frames
+            let count = viewModel.frames.count
+            let clamped = max(0.0, min(Double(count - 1), viewModel.animationProgress))
+            let lower = Int(floor(clamped))
+            let upper = min(count - 1, lower + 1)
+            let fraction = clamped - Double(lower)
+
+            let lowerTemplate = viewModel.tileURLTemplate(for: viewModel.frames[lower])
+            let upperTemplate = viewModel.tileURLTemplate(for: viewModel.frames[upper])
+
+            // Smooth cosine blending curve for gradual, natural transition
+            let smoothFraction = CGFloat((1.0 - cos(fraction * .pi)) / 2.0)
+            let alphaLower: CGFloat
+            let alphaUpper: CGFloat
+
+            if lower == upper {
+                alphaLower = baseOpacity
+                alphaUpper = 0.0
+            } else {
+                alphaLower = (1.0 - smoothFraction) * baseOpacity
+                alphaUpper = smoothFraction * baseOpacity
+            }
+
+            // Double-buffer ping-pong slots
+            if templateA == lowerTemplate {
+                setAlpha(for: overlayA!, in: mapView, alpha: alphaLower)
+
+                if upper == lower {
+                    if let b = overlayB {
+                        mapView.removeOverlay(b)
+                        renderers.removeValue(forKey: ObjectIdentifier(b))
+                        targetAlphas.removeValue(forKey: ObjectIdentifier(b))
+                        overlayB = nil
+                        templateB = nil
+                    }
+                } else if templateB == upperTemplate, let b = overlayB {
+                    setAlpha(for: b, in: mapView, alpha: alphaUpper)
+                } else {
+                    if let b = overlayB {
+                        mapView.removeOverlay(b)
+                        renderers.removeValue(forKey: ObjectIdentifier(b))
+                        targetAlphas.removeValue(forKey: ObjectIdentifier(b))
+                    }
+                    let newB = RainViewerTileOverlay(urlTemplate: upperTemplate)
+                    newB.canReplaceMapContent = false
+                    newB.maximumZ = 7
+                    newB.minimumZ = 1
+                    overlayB = newB
+                    templateB = upperTemplate
+                    targetAlphas[ObjectIdentifier(newB)] = alphaUpper
+                    mapView.addOverlay(newB, level: .aboveRoads)
+                    setAlpha(for: newB, in: mapView, alpha: alphaUpper)
+                }
+            } else if templateB == lowerTemplate {
+                setAlpha(for: overlayB!, in: mapView, alpha: alphaLower)
+
+                if upper == lower {
+                    if let a = overlayA {
+                        mapView.removeOverlay(a)
+                        renderers.removeValue(forKey: ObjectIdentifier(a))
+                        targetAlphas.removeValue(forKey: ObjectIdentifier(a))
+                        overlayA = nil
+                        templateA = nil
+                    }
+                } else if templateA == upperTemplate, let a = overlayA {
+                    setAlpha(for: a, in: mapView, alpha: alphaUpper)
+                } else {
+                    if let a = overlayA {
+                        mapView.removeOverlay(a)
+                        renderers.removeValue(forKey: ObjectIdentifier(a))
+                        targetAlphas.removeValue(forKey: ObjectIdentifier(a))
+                    }
+                    let newA = RainViewerTileOverlay(urlTemplate: upperTemplate)
+                    newA.canReplaceMapContent = false
+                    newA.maximumZ = 7
+                    newA.minimumZ = 1
+                    overlayA = newA
+                    templateA = upperTemplate
+                    targetAlphas[ObjectIdentifier(newA)] = alphaUpper
+                    mapView.addOverlay(newA, level: .aboveRoads)
+                    setAlpha(for: newA, in: mapView, alpha: alphaUpper)
+                }
+            } else {
+                // Neither slot matches lower frame: clean up and rebuild
+                removeAllOverlays(from: mapView)
+
+                let newA = RainViewerTileOverlay(urlTemplate: lowerTemplate)
+                newA.canReplaceMapContent = false
+                newA.maximumZ = 7
+                newA.minimumZ = 1
+                overlayA = newA
+                templateA = lowerTemplate
+                targetAlphas[ObjectIdentifier(newA)] = alphaLower
+                mapView.addOverlay(newA, level: .aboveRoads)
+                setAlpha(for: newA, in: mapView, alpha: alphaLower)
+
+                if upper != lower {
+                    let newB = RainViewerTileOverlay(urlTemplate: upperTemplate)
+                    newB.canReplaceMapContent = false
+                    newB.maximumZ = 7
+                    newB.minimumZ = 1
+                    overlayB = newB
+                    templateB = upperTemplate
+                    targetAlphas[ObjectIdentifier(newB)] = alphaUpper
+                    mapView.addOverlay(newB, level: .aboveRoads)
+                    setAlpha(for: newB, in: mapView, alpha: alphaUpper)
+                }
+            }
+        }
+
+        func removeAllOverlays(from mapView: MKMapView) {
+            if let a = overlayA {
+                mapView.removeOverlay(a)
+                renderers.removeValue(forKey: ObjectIdentifier(a))
+                targetAlphas.removeValue(forKey: ObjectIdentifier(a))
+            }
+            if let b = overlayB {
+                mapView.removeOverlay(b)
+                renderers.removeValue(forKey: ObjectIdentifier(b))
+                targetAlphas.removeValue(forKey: ObjectIdentifier(b))
+            }
+            overlayA = nil
+            templateA = nil
+            overlayB = nil
+            templateB = nil
+
+            let strays = mapView.overlays.filter { $0 is MKTileOverlay }
+            if !strays.isEmpty {
+                mapView.removeOverlays(strays)
+            }
         }
     }
 }
@@ -389,6 +611,17 @@ public struct RadarPanelView: View {
             }
             .buttonStyle(MapControlButtonStyle(isActive: viewModel.isSatelliteMode))
             .help("Toggle Satellite Imagery")
+
+            // Smooth Interpolation Toggle Button
+            Button(action: {
+                viewModel.isInterpolating.toggle()
+            }) {
+                Image(systemName: viewModel.isInterpolating ? "waveform" : "waveform.slash")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(MapControlButtonStyle(isActive: viewModel.isInterpolating))
+            .help(viewModel.isInterpolating ? "Smooth frame interpolation: ON" : "Smooth frame interpolation: OFF")
         }
     }
 
@@ -431,15 +664,18 @@ public struct RadarPanelView: View {
                 .buttonStyle(.plain)
                 .help("Next radar frame")
 
-                // Timeline Scrubber Slider
+                // Timeline Scrubber Slider with continuous interpolated scrubbing
                 if !viewModel.frames.isEmpty {
                     Slider(
                         value: Binding(
-                            get: { Double(viewModel.currentFrameIndex) },
-                            set: { viewModel.selectFrame(at: Int($0.rounded())) }
+                            get: { viewModel.animationProgress },
+                            set: { newValue in
+                                viewModel.pause()
+                                viewModel.animationProgress = newValue
+                                viewModel.currentFrameIndex = min(viewModel.frames.count - 1, max(0, Int(round(newValue))))
+                            }
                         ),
-                        in: 0...Double(max(1, viewModel.frames.count - 1)),
-                        step: 1
+                        in: 0...Double(max(1, viewModel.frames.count - 1))
                     )
                     .accentColor(.accentColor)
                 } else {

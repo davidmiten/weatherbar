@@ -216,5 +216,79 @@ struct WeatherBarTests {
         vm.toggleSatellite()
         #expect(vm.isSatelliteMode == true)
     }
+
+    @Test("Radar Frame Interpolation and Progress Calculation")
+    @MainActor
+    func testRadarFrameInterpolation() {
+        let seattle = WeatherLocation(name: "Seattle", adminArea: "WA", latitude: 47.6062, longitude: -122.3321)
+        let vm = RadarViewModel(location: seattle)
+
+        // Frames 600s (10 minutes) apart
+        let baseTime = 1700000000
+        let mockFrames = [
+            RadarFrame(time: baseTime, path: "/v2/radar/f1"),
+            RadarFrame(time: baseTime + 600, path: "/v2/radar/f2"),
+            RadarFrame(time: baseTime + 1200, path: "/v2/radar/f3")
+        ]
+        vm.frames = mockFrames
+        vm.isInterpolating = true
+
+        // Progress exactly at frame 0
+        vm.animationProgress = 0.0
+        #expect(vm.interpolatedDate?.timeIntervalSince1970 == Double(baseTime))
+
+        // Halfway between frame 0 and frame 1
+        vm.animationProgress = 0.5
+        #expect(vm.interpolatedDate?.timeIntervalSince1970 == Double(baseTime + 300))
+
+        // Progress at frame 1.25 (25% between frame 1 and frame 2)
+        vm.animationProgress = 1.25
+        #expect(vm.interpolatedDate?.timeIntervalSince1970 == Double(baseTime + 600 + 150))
+
+        // Progress clamped at upper bound
+        vm.animationProgress = 5.0
+        #expect(vm.interpolatedDate?.timeIntervalSince1970 == Double(baseTime + 1200))
+
+        // Progress clamped at lower bound
+        vm.animationProgress = -1.0
+        #expect(vm.interpolatedDate?.timeIntervalSince1970 == Double(baseTime))
+
+        // Tile URL generation for specific frame
+        let template2 = vm.tileURLTemplate(for: mockFrames[1])
+        #expect(template2.contains("/v2/radar/f2/"))
+    }
+
+    @Test("Radar Continuous Timeline Scrubbing")
+    @MainActor
+    func testRadarInterpolationScrubbing() {
+        let seattle = WeatherLocation(name: "Seattle", adminArea: "WA", latitude: 47.6062, longitude: -122.3321)
+        let vm = RadarViewModel(location: seattle)
+
+        let mockFrames = [
+            RadarFrame(time: 1000, path: "/v2/radar/f1"),
+            RadarFrame(time: 1600, path: "/v2/radar/f2"),
+            RadarFrame(time: 2200, path: "/v2/radar/f3")
+        ]
+        vm.frames = mockFrames
+
+        // Simulate dragging the scrubber continuously
+        vm.animationProgress = 1.4
+        vm.currentFrameIndex = min(vm.frames.count - 1, max(0, Int(round(1.4))))
+        #expect(vm.currentFrameIndex == 1)
+
+        vm.animationProgress = 1.8
+        vm.currentFrameIndex = min(vm.frames.count - 1, max(0, Int(round(1.8))))
+        #expect(vm.currentFrameIndex == 2)
+
+        // Select specific frame snaps animationProgress
+        vm.selectFrame(at: 0)
+        #expect(vm.animationProgress == 0.0)
+        #expect(vm.currentFrameIndex == 0)
+
+        // Step forward snaps progress
+        vm.stepForward()
+        #expect(vm.animationProgress == 1.0)
+        #expect(vm.currentFrameIndex == 1)
+    }
 }
 
